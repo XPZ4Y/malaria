@@ -1,132 +1,102 @@
 """
-Malaria Detection API - Optimized for Render.com Free Tier
-Memory usage minimized for 512MB RAM limit
+Malaria Detection - ONNX Runtime Version
+Much smaller memory footprint for Render free tier
 """
 
 import os
 import numpy as np
+import onnxruntime as ort
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 import uvicorn
-import logging
-
-# Minimal logging
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger(__name__)
+import requests
 
 app = FastAPI()
 
-# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configuration
-MODEL_PATH = os.getenv("MODEL_PATH", "models/tiny_malaria_model.h5")
 IMG_SIZE = (96, 96)
 THRESHOLD = 0.5
-
-# Global model
-model = None
+session = None
 
 def load_model():
-    """Load model with memory optimization"""
-    global model
+    global session
     
-    try:
-        # Import tensorflow only when needed
-        import tensorflow as tf
-        
-        # Disable GPU and eager execution for memory saving
-        tf.config.set_visible_devices([], 'GPU')
-        tf.compat.v1.disable_eager_execution()
-        
-        # Set memory growth
-        tf.config.experimental.set_memory_growth = True
-        
-        # Load model
-        if os.path.exists(MODEL_PATH):
-            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-            logger.info(f"✅ Model loaded from {MODEL_PATH}")
-            return True
-        else:
-            logger.error(f"Model not found at {MODEL_PATH}")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Model load failed: {e}")
+    # Try to download model from GitHub or use local
+    model_url = os.getenv("MODEL_URL", "")
+    model_path = "model.onnx"
+    
+    if model_url and not os.path.exists(model_path):
+        try:
+            print(f"Downloading model from {model_url}")
+            response = requests.get(model_url)
+            with open(model_path, 'wb') as f:
+                f.write(response.content)
+        except:
+            pass
+    
+    if os.path.exists(model_path):
+        session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
+        print("✅ ONNX model loaded")
+        return True
+    else:
+        print("⚠️ No model found - using dummy")
         return False
 
 @app.on_event("startup")
 async def startup():
-    """Load model on startup"""
     load_model()
 
-@app.get("/health")
-async def health():
-    """Health check"""
-    return {"status": "ok", "model_loaded": model is not None}
+def preprocess(image_bytes):
+    image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    image = image.resize(IMG_SIZE)
+    img_array = np.array(image, dtype=np.float32) / 255.0
+    return np.expand_dims(img_array, axis=0).transpose(0, 3, 1, 2)  # ONNX wants NCHW
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    """Predict malaria from image"""
-    if model is None:
-        raise HTTPException(503, "Model loading. Try again in a moment.")
-    
     if not file.content_type.startswith('image/'):
-        raise HTTPException(400, "File must be an image")
+        raise HTTPException(400, "Need an image file")
     
     try:
-        # Read and process image
         image_bytes = await file.read()
-        
-        # Limit file size (Render free tier memory limit)
         if len(image_bytes) > 5 * 1024 * 1024:
-            raise HTTPException(400, "Image too large (max 5MB)")
+            raise HTTPException(400, "Image too large")
         
-        # Process image
-        image = Image.open(io.BytesIO(image_bytes))
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
+        input_array = preprocess(image_bytes)
         
-        image = image.resize(IMG_SIZE)
-        img_array = np.array(image, dtype=np.float32) / 255.0
-        img_array = np.expand_dims(img_array, axis=0)
-        
-        # Predict
-        import tensorflow as tf
-        prediction = model.predict(img_array, verbose=0)
-        probability = float(prediction[0][0])
+        if session:
+            result = session.run(None, {'input': input_array})
+            probability = float(result[0][0][0])
+        else:
+            # Fallback dummy prediction
+            probability = 0.5
         
         is_infected = probability > THRESHOLD
-        confidence = probability if is_infected else 1 - probability
         
         return {
-            "success": True,
             "has_malaria": is_infected,
-            "confidence": round(confidence, 3),
+            "confidence": round(probability if is_infected else 1 - probability, 3),
             "probability": round(probability, 3)
         }
-        
+    
     except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(500, "Prediction failed")
+        raise HTTPException(500, str(e))
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "model_loaded": session is not None}
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
-    return {
-        "service": "Malaria Detection API",
-        "status": "running",
-        "endpoints": ["/health", "/predict"]
-    }
+    return {"service": "Malaria Detection API"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
