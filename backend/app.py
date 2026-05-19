@@ -21,7 +21,7 @@ import uvicorn
 
 IMG_SIZE = (96, 96)
 # Get model path - works both locally and on Render
-MODEL_PATH = os.environ.get("MODEL_PATH", "models/tiny_malaria_model_dynamic.h5")
+MODEL_PATH = os.environ.get("MODEL_PATH", "models/tiny_malaria_model.h5")
 
 # ============================================
 # MODEL LOADER
@@ -30,27 +30,20 @@ MODEL_PATH = os.environ.get("MODEL_PATH", "models/tiny_malaria_model_dynamic.h5"
 class MalariaDetector:
     def __init__(self, model_path: str):
         self.model_path = model_path
-        self.interpreter = None
-        self.input_details = None
-        self.output_details = None
+        self.model = None
         self.is_loaded = False
         
     def load_model(self):
-        """Load TFLite model"""
+        """Load Keras (.h5) model"""
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Model not found at {self.model_path}")
         
         try:
-            self.interpreter = tf.lite.Interpreter(model_path=self.model_path)
-            self.interpreter.allocate_tensors()
-            self.input_details = self.interpreter.get_input_details()
-            self.output_details = self.interpreter.get_output_details()
+            self.model = tf.keras.models.load_model(self.model_path)
             self.is_loaded = True
             
             print(f"✓ Model loaded: {self.model_path}")
-            print(f"  Input dtype: {self.input_details[0]['dtype']}")
-            print(f"  Input shape: {self.input_details[0]['shape']}")
-            print(f"  Output dtype: {self.output_details[0]['dtype']}")
+            # print(self.model.summary())
             
         except Exception as e:
             print(f"✗ Failed to load model: {e}")
@@ -66,6 +59,9 @@ class MalariaDetector:
         image = image.resize(IMG_SIZE)
         img_array = np.array(image)
         
+        # Standardize/Normalize as per training (usually /255.0)
+        img_array = img_array.astype(np.float32) / 255.0
+        
         return img_array
     
     def predict(self, image_bytes: bytes) -> Dict[str, Any]:
@@ -77,21 +73,11 @@ class MalariaDetector:
             # Preprocess
             img_array = self.preprocess_image(image_bytes)
             
-            # Prepare input
-            input_dtype = self.input_details[0]['dtype']
-            if input_dtype == np.uint8:
-                input_data = np.expand_dims(img_array, axis=0).astype(np.uint8)
-            else:
-                input_data = np.expand_dims(img_array.astype(np.float32) / 255.0, axis=0)
+            # Prepare input (add batch dimension)
+            input_data = np.expand_dims(img_array, axis=0)
             
             # Run inference
-            self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
-            self.interpreter.invoke()
-            
-            # Get output
-            output = self.interpreter.get_tensor(self.output_details[0]['index'])
-            if output.dtype == np.uint8:
-                output = output.astype(np.float32) / 255.0
+            output = self.model.predict(input_data)
             
             probability = float(output[0][0])
             has_malaria = probability > 0.5
