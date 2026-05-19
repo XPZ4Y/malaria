@@ -440,7 +440,7 @@ def create_proper_split():
 
     # Check if split already exists
     if os.path.exists(SPLIT_DIR) and len(os.listdir(SPLIT_DIR)) > 0:
-        response = input(f"\n{split_dir} already exists. Re-split? (y/n): ")
+        response = input(f"\n{SPLIT_DIR} already exists. Re-split? (y/n): ")
         if response.lower() != 'y':
             print("✓ Using existing split directory")
             return True
