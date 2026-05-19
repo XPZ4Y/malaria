@@ -9,7 +9,7 @@ It will be hosted in a backend, on node.
 
 This is built to run on colab. To leverage foreign compute
 
-## Connecting to the google drive
+## 1) Connecting to the google drive
 
 ```py
 """
@@ -86,7 +86,7 @@ if __name__ == "__main__":
 ```
 
 
-## Download script
+## 2) Download script
 
 ```py
 """
@@ -355,7 +355,7 @@ if __name__ == "__main__":
     download_dataset(method="tensorflow")  # or method="kaggle"
 ```
 
-## Training script
+## 3) Training script
 comment: I dont think it follows the 80:20 method of AI training
 ```py
 """
@@ -890,6 +890,7 @@ def save_metrics_summary(accuracy, sensitivity, specificity, cm):
         f.write(str(cm))
 
     print("\n✓ Test metrics saved to test_metrics.txt")
+    
 
 # ─────────────────────────────────────────────
 # 10. MAIN PIPELINE
