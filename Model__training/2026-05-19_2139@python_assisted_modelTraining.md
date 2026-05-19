@@ -994,7 +994,7 @@ else:
         print("\nYou need to run the training script first!")
 ```
 
-### Part 2: tiny trainer
+### Part 2: tiny runner
 ```py
 """
 Step 3: WEB INTERFACE WITH DRAG & DROP
@@ -1229,4 +1229,69 @@ iface.launch(
     debug=False,
     show_error=True
 )
+```
+
+
+## Let's create python backend to host the .h5 file
+
+```py
+# flask_backend.py
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import tensorflow as tf
+from PIL import Image
+import numpy as np
+import io
+
+app = Flask(__name__)
+CORS(app)
+
+# Load model
+IMG_SIZE = (96, 96)
+interpreter = tf.lite.Interpreter(model_path="tiny_malaria_model.h5")
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+def predict_image(image_bytes):
+    # Preprocess
+    image = Image.open(io.BytesIO(image_bytes)).convert('RGB').resize(IMG_SIZE)
+    img_array = np.array(image)
+    
+    # Prepare input
+    if input_details[0]['dtype'] == np.uint8:
+        input_data = np.expand_dims(img_array, axis=0).astype(np.uint8)
+    else:
+        input_data = np.expand_dims(img_array.astype(np.float32) / 255.0, axis=0)
+    
+    # Run inference
+    interpreter.set_tensor(input_details[0]['index'], input_data)
+    interpreter.invoke()
+    output = interpreter.get_tensor(output_details[0]['index'])
+    
+    if output.dtype == np.uint8:
+        output = output.astype(np.float32) / 255.0
+    
+    probability = float(output[0][0])
+    has_malaria = probability > 0.5
+    
+    return {
+        "has_malaria": has_malaria,
+        "probability": probability,
+        "confidence": probability if has_malaria else 1 - probability
+    }
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image provided"}), 400
+    
+    file = request.files['image']
+    image_bytes = file.read()
+    result = predict_image(image_bytes)
+    
+    return jsonify(result)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
 ```
