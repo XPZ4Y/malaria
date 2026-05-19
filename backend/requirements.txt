@@ -1,7 +1,15 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.6
-Pillow==10.1.0
+# TensorFlow 2.13.0 (Render-compatible)
+tensorflow==2.13.0
+
+# Flask web framework
+flask==2.3.3
+flask-cors==4.0.0
+
+# Image processing
+pillow==10.0.0
+
+# Utilities
 numpy==1.24.3
-onnxruntime==1.16.3
-requests==2.31.0
+gunicorn==21.2.0
+
+# For base64 handling (already in standard lib)

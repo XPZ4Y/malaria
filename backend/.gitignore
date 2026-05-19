@@ -6,9 +6,11 @@ __pycache__/
 .Python
 
 # Virtual Environment
-venv/
 env/
+venv/
 ENV/
+env.bak/
+venv.bak/
 
 # IDE
 .vscode/
@@ -16,20 +18,10 @@ ENV/
 *.swp
 *.swo
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
+# Model files (large)
+*.h5
+*.tflite
+models/
 
-# Local development files
-*.log
-*.db
-.DS_Store
-
-# Uploads (if any)
-uploads/
-temp/
-
-# Model files (if too large, but include if small enough)
-# *.tflite
-# *.h5
+# Environment variables
+.env

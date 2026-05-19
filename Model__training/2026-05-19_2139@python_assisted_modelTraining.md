@@ -1232,7 +1232,14 @@ iface.launch(
 ```
 
 
-## Let's create python backend to host the .h5 file
+## Let's create python backend to host the .h5 file on render
+
+Notes:
+> I am deploying the instance on render free version.
+
+> trying to include tensorflow >2.13.0 yields an error. 
+
+> I will be keeping it up inside `UptimeRobot`. Pinging /health endpoint
 app.py
 ```py
 pass
