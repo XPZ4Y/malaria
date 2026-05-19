@@ -1,6 +1,11 @@
+# TFLite runtime only (much smaller, no training overhead)
+tflite-runtime==2.14.0
+
+# FastAPI and server
 fastapi==0.104.1
-uvicorn==0.24.0
-tensorflow==2.13.0
-Pillow==10.1.0
+uvicorn[standard]==0.24.0
 python-multipart==0.0.6
+
+# Image processing
+Pillow==10.1.0
 numpy==1.24.3
