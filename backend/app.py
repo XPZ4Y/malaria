@@ -1,324 +1,133 @@
 """
-Malaria Detection API - FastAPI Backend
----------------------------------------
-Hosts the .h5 model for real-time inference
+Malaria Detection API - Optimized for Render.com Free Tier
+Memory usage minimized for 512MB RAM limit
 """
 
 import os
 import numpy as np
-import tensorflow as tf
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 import uvicorn
-from typing import Dict, Any
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Minimal logging
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Malaria Detection API",
-    description="AI-powered malaria detection from blood cell images",
-    version="1.0.0"
-)
+app = FastAPI()
 
-# Enable CORS for frontend access
+# CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Model configuration
-MODEL_PATH = "models/tiny_malaria_model.h5"
+# Configuration
+MODEL_PATH = os.getenv("MODEL_PATH", "models/tiny_malaria_model.h5")
 IMG_SIZE = (96, 96)
-CLASS_THRESHOLD = 0.5
+THRESHOLD = 0.5
 
-# Global model variable
+# Global model
 model = None
 
 def load_model():
-    """Load the trained Keras model"""
+    """Load model with memory optimization"""
     global model
+    
     try:
-        if not os.path.exists(MODEL_PATH):
-            raise FileNotFoundError(f"Model not found at {MODEL_PATH}")
+        # Import tensorflow only when needed
+        import tensorflow as tf
         
-        model = tf.keras.models.load_model(MODEL_PATH)
-        logger.info(f"✅ Model loaded successfully from {MODEL_PATH}")
-        logger.info(f"Model input shape: {model.input_shape}")
-        logger.info(f"Model output shape: {model.output_shape}")
-        return True
+        # Disable GPU and eager execution for memory saving
+        tf.config.set_visible_devices([], 'GPU')
+        tf.compat.v1.disable_eager_execution()
+        
+        # Set memory growth
+        tf.config.experimental.set_memory_growth = True
+        
+        # Load model
+        if os.path.exists(MODEL_PATH):
+            model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+            logger.info(f"✅ Model loaded from {MODEL_PATH}")
+            return True
+        else:
+            logger.error(f"Model not found at {MODEL_PATH}")
+            return False
+            
     except Exception as e:
-        logger.error(f"❌ Failed to load model: {str(e)}")
+        logger.error(f"Model load failed: {e}")
         return False
 
-def preprocess_image(image_bytes: bytes) -> np.ndarray:
-    """
-    Preprocess image for model inference
+@app.on_event("startup")
+async def startup():
+    """Load model on startup"""
+    load_model()
+
+@app.get("/health")
+async def health():
+    """Health check"""
+    return {"status": "ok", "model_loaded": model is not None}
+
+@app.post("/predict")
+async def predict(file: UploadFile = File(...)):
+    """Predict malaria from image"""
+    if model is None:
+        raise HTTPException(503, "Model loading. Try again in a moment.")
     
-    Args:
-        image_bytes: Raw image bytes
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(400, "File must be an image")
     
-    Returns:
-        Preprocessed image array ready for model input
-    """
     try:
-        # Open image from bytes
-        image = Image.open(io.BytesIO(image_bytes))
+        # Read and process image
+        image_bytes = await file.read()
         
-        # Convert to RGB if needed
+        # Limit file size (Render free tier memory limit)
+        if len(image_bytes) > 5 * 1024 * 1024:
+            raise HTTPException(400, "Image too large (max 5MB)")
+        
+        # Process image
+        image = Image.open(io.BytesIO(image_bytes))
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Resize to model input size
         image = image.resize(IMG_SIZE)
-        
-        # Convert to array and normalize
         img_array = np.array(image, dtype=np.float32) / 255.0
-        
-        # Add batch dimension
         img_array = np.expand_dims(img_array, axis=0)
         
-        logger.info(f"✅ Image preprocessed: shape={img_array.shape}")
-        return img_array
-    
-    except Exception as e:
-        logger.error(f"❌ Image preprocessing failed: {str(e)}")
-        raise HTTPException(status_code=400, detail=f"Invalid image: {str(e)}")
-
-def predict(image_array: np.ndarray) -> Dict[str, Any]:
-    """
-    Run model inference
-    
-    Args:
-        image_array: Preprocessed image array
-    
-    Returns:
-        Dictionary containing prediction results
-    """
-    try:
-        # Run prediction
-        prediction = model.predict(image_array, verbose=0)
+        # Predict
+        import tensorflow as tf
+        prediction = model.predict(img_array, verbose=0)
         probability = float(prediction[0][0])
         
-        # Determine class
-        is_infected = probability > CLASS_THRESHOLD
+        is_infected = probability > THRESHOLD
         confidence = probability if is_infected else 1 - probability
-        class_label = "Parasitized" if is_infected else "Uninfected"
         
         return {
             "success": True,
-            "prediction": {
-                "has_malaria": is_infected,
-                "class": class_label,
-                "probability_infected": round(probability, 4),
-                "probability_healthy": round(1 - probability, 4),
-                "confidence": round(confidence, 4),
-                "threshold_used": CLASS_THRESHOLD
-            }
+            "has_malaria": is_infected,
+            "confidence": round(confidence, 3),
+            "probability": round(probability, 3)
         }
-    
+        
     except Exception as e:
-        logger.error(f"❌ Prediction failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
-
-@app.on_event("startup")
-async def startup_event():
-    """Load model on startup"""
-    logger.info("Starting Malaria Detection API...")
-    if not load_model():
-        logger.warning("⚠️ Model not loaded. API will not function properly.")
+        logger.error(f"Prediction error: {e}")
+        raise HTTPException(500, "Prediction failed")
 
 @app.get("/")
 async def root():
-    """Root endpoint with API information"""
+    """Root endpoint"""
     return {
-        "name": "Malaria Detection API",
-        "version": "1.0.0",
-        "status": "operational",
-        "model_loaded": model is not None,
-        "endpoints": {
-            "health": "/health",
-            "predict": "/predict (POST)",
-            "predict_base64": "/predict/base64 (POST)",
-            "info": "/info"
-        }
+        "service": "Malaria Detection API",
+        "status": "running",
+        "endpoints": ["/health", "/predict"]
     }
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy" if model is not None else "degraded",
-        "model_loaded": model is not None,
-        "model_path": MODEL_PATH
-    }
-
-@app.get("/info")
-async def model_info():
-    """Get model information"""
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-    
-    return {
-        "model_path": MODEL_PATH,
-        "input_shape": list(model.input_shape),
-        "output_shape": list(model.output_shape),
-        "input_size": IMG_SIZE,
-        "threshold": CLASS_THRESHOLD,
-        "total_parameters": model.count_params()
-    }
-
-@app.post("/predict")
-async def predict_image(file: UploadFile = File(...)):
-    """
-    Predict malaria from uploaded image file
-    
-    Args:
-        file: Image file (jpg, png, jpeg)
-    
-    Returns:
-        Prediction results
-    """
-    # Validate file type
-    if not file.content_type.startswith('image/'):
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid file type. Expected image, got {file.content_type}"
-        )
-    
-    try:
-        # Read image bytes
-        image_bytes = await file.read()
-        
-        # Validate file size (max 10MB)
-        if len(image_bytes) > 10 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="File too large. Max size 10MB")
-        
-        # Preprocess image
-        img_array = preprocess_image(image_bytes)
-        
-        # Run prediction
-        result = predict(img_array)
-        
-        return JSONResponse(content=result)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-@app.post("/predict/base64")
-async def predict_base64(data: Dict[str, str]):
-    """
-    Predict malaria from base64 encoded image
-    
-    Args:
-        data: JSON with 'image' field containing base64 encoded image
-    
-    Returns:
-        Prediction results
-    """
-    import base64
-    
-    try:
-        if 'image' not in data:
-            raise HTTPException(status_code=400, detail="Missing 'image' field")
-        
-        # Decode base64
-        image_bytes = base64.b64decode(data['image'])
-        
-        # Preprocess image
-        img_array = preprocess_image(image_bytes)
-        
-        # Run prediction
-        result = predict(img_array)
-        
-        return JSONResponse(content=result)
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Base64 prediction error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
-
-@app.post("/predict/batch")
-async def predict_batch(files: list[UploadFile] = File(...)):
-    """
-    Predict malaria for multiple images
-    
-    Args:
-        files: List of image files
-    
-    Returns:
-        Batch prediction results
-    """
-    if len(files) > 10:
-        raise HTTPException(status_code=400, detail="Maximum 10 images per batch")
-    
-    results = []
-    errors = []
-    
-    for idx, file in enumerate(files):
-        try:
-            # Validate file type
-            if not file.content_type.startswith('image/'):
-                errors.append({
-                    "index": idx,
-                    "filename": file.filename,
-                    "error": f"Invalid file type: {file.content_type}"
-                })
-                continue
-            
-            # Read and process image
-            image_bytes = await file.read()
-            if len(image_bytes) > 10 * 1024 * 1024:
-                errors.append({
-                    "index": idx,
-                    "filename": file.filename,
-                    "error": "File too large (max 10MB)"
-                })
-                continue
-            
-            img_array = preprocess_image(image_bytes)
-            result = predict(img_array)
-            
-            results.append({
-                "index": idx,
-                "filename": file.filename,
-                **result
-            })
-        
-        except Exception as e:
-            errors.append({
-                "index": idx,
-                "filename": file.filename,
-                "error": str(e)
-            })
-    
-    return JSONResponse(content={
-        "success": True,
-        "total_processed": len(results),
-        "total_errors": len(errors),
-        "results": results,
-        "errors": errors
-    })
 
 if __name__ == "__main__":
-    # Run the API server
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,  # Set to False in production
-        log_level="info"
-    )
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)

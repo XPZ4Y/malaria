@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: malaria-detection-api
+    runtime: python
+    repo: https://github.com/yourusername/malaria-api
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.6
+      - key: MODEL_PATH
+        value: models/tiny_malaria_model.h5
+      - key: CLASS_THRESHOLD
+        value: 0.5
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
