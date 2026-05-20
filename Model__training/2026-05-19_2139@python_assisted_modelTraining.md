@@ -935,7 +935,6 @@ if __name__ == "__main__":
 
 
 ## 4) Running the model
-comment: I dont think it follows the 80:20 method of AI training
 
 ### Part 1: load the model
 ```py
