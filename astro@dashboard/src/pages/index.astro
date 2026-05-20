@@ -1,0 +1,111 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { supabase } from '../lib/supabase';
+
+// Fetch reports from Supabase
+const { data: reports, error } = await supabase
+  .from('reports')
+  .select('*')
+  .order('created_at', { ascending: false });
+
+if (error) {
+  console.error('Error fetching reports:', error);
+}
+
+const stats = {
+  total: reports?.length || 0,
+  positive: reports?.filter(r => r.status?.toUpperCase() === 'POSITIVE').length || 0,
+  negative: reports?.filter(r => r.status?.toUpperCase() === 'NEGATIVE').length || 0,
+  avgInfectionRate: reports?.length 
+    ? (reports.reduce((acc, r) => acc + (r.infection_rate || 0), 0) / reports.length).toFixed(2) 
+    : 0
+};
+---
+
+<Layout title="JWARA.AI | Admin Dashboard">
+	<h1>Screening Overview</h1>
+
+	<div class="stats">
+		<div class="card">
+			<small>Total Reports</small>
+			<h3>{stats.total}</h3>
+		</div>
+		<div class="card">
+			<small>Positive Cases</small>
+			<h3>{stats.positive}</h3>
+		</div>
+		<div class="card">
+			<small>Negative Cases</small>
+			<h3>{stats.negative}</h3>
+		</div>
+		<div class="card">
+			<small>Avg Infection Rate</small>
+			<h3>{stats.avgInfectionRate}%</h3>
+		</div>
+	</div>
+
+	<div class="table-container">
+		<table>
+			<thead>
+				<tr>
+					<th>Date</th>
+					<th>Patient</th>
+					<th>DOB</th>
+					<th>Status</th>
+					<th>Diagnosis</th>
+					<th>Infection %</th>
+					<th>Cells (I/H/T)</th>
+					<th>Vitals (BP / O2)</th>
+					<th>Mode</th>
+					<th>Quality</th>
+				</tr>
+			</thead>
+			<tbody>
+				{reports && reports.length > 0 ? (
+					reports.map((report) => (
+						<tr>
+							<td>{new Date(report.created_at).toLocaleDateString()}</td>
+							<td>
+								<strong>{report.patient_name}</strong>
+								<div style="font-size: 11px; color: #777;" title={`File: ${report.filename}`}>{report.id.substring(0, 8)}...</div>
+							</td>
+							<td>{report.dob || '-'}</td>
+							<td>
+								<span class={`status-pill ${report.status?.toUpperCase() === 'POSITIVE' ? 'status-positive' : 'status-negative'}`}>
+									{report.status?.toUpperCase() || 'UNKNOWN'}
+								</span>
+							</td>
+							<td>{report.diagnosis || '-'}</td>
+							<td>
+								{report.infection_rate}%
+								<div style="font-size: 11px; color: #777;">Conf: {(report.model_confidence * 100).toFixed(1)}%</div>
+							</td>
+							<td>
+								<span title="Infected / Healthy / Total">
+									{report.infected_cells} / {report.healthy_cells} / {report.total_cells}
+								</span>
+							</td>
+							<td>
+								{report.blood_pressure || '-'} / {report.blood_o2 ? `${report.blood_o2}%` : '-'}
+							</td>
+							<td style="text-transform: capitalize;">{report.inference_mode}</td>
+							<td>
+								{report.quality_ok ? (
+									<span style="color: #008f5a;">✓ OK</span>
+								) : (
+									<span style="color: #8A0303;" title={report.quality_message}>⚠ Fail</span>
+								)}
+							</td>
+						</tr>
+					))
+				) : (
+					<tr>
+						<td colspan="9" style="text-align: center; padding: 40px; color: #777;">
+							No reports found in the database.
+						</td>
+					</tr>
+				)}
+			</tbody>
+		</table>
+	</div>
+</Layout>
